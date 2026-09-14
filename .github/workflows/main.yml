@@ -1,29 +1,89 @@
+# Example YouTube automation workflow â€” adapt script paths, runtime, and secrets to your project
 name: YouTube Automation
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish after upload?'
+        required: false
+        default: 'true'
   schedule:
-    - cron: "0 16 * * *"
+    - cron: '0 16 * * *' # runs at 16:00 UTC daily
+
+concurrency:
+  group: youtube-automation
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # set a default timezone for scripts if needed
+  TZ: UTC
 
 jobs:
-  automation-test:
+  automation:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
 
     steps:
-      - name: Start automation
-        run: echo "YouTube automation started"
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Get educational topic
-        run: echo "Topic: Newton's Third Law of Motion"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
-      - name: Generate script
-        run: echo "Educational cartoon script generated"
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f requirements.txt ]; then echo "Use Python job variant"; fi
 
-      - name: Prepare video
-        run: echo "Video preparation started"
+      - name: Generate topic (script)
+        id: gen_topic
+        run: |
+          # example: write topic to file and print it as step output
+          node ./scripts/generate-topic.js > .github/workflows/topic.txt
+          echo "topic=$(cat .github/workflows/topic.txt)" >> $GITHUB_OUTPUT
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Prepare Short
-        run: echo "YouTube Short preparation started"
+      - name: Generate script from topic
+        id: gen_script
+        run: |
+          node ./scripts/generate-script.js --topic "${{ steps.gen_topic.outputs.topic }}" > .github/workflows/script.txt
+          echo "script_path=.github/workflows/script.txt" >> $GITHUB_OUTPUT
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Prepare video & short (render)
+        id: render
+        run: |
+          mkdir -p ./out
+          # placeholder â€” replace with your renderer/animation command
+          node ./scripts/render-video.js --script .github/workflows/script.txt --out ./out/video.mp4
+          node ./scripts/render-short.js --script .github/workflows/script.txt --out ./out/short.mp4
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+
+      - name: Upload artifacts (log/preview)
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-assets
+          path: ./out
+
+      - name: Upload to YouTube (placeholder)
+        if: always()
+        run: |
+          # Replace with your upload script that uses OAuth2 refresh token or service account
+          node ./scripts/upload-to-youtube.js --file ./out/video.mp4 --title "Daily Cartoon - ${{ steps.gen_topic.outputs.topic }}" --publish=${{ github.event.inputs.publish || 'true' }}
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
       - name: Finish
-        run: echo "Automation test completed successfully"
+        run: echo "Automation completed"
